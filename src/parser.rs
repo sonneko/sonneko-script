@@ -3,7 +3,9 @@ use super::lexer::Token;
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     // 数値リテラル: 42
-    Number(i64),
+    Number(f64),
+    String(String),
+    Bool(bool),
     
     // 変数参照: x
     Variable(String),
@@ -201,7 +203,7 @@ impl Parser {
         node
     }
 
-    // Primary = Number | FunctionCall | Identifier | "(" , Expression , ")"
+    // Primary = Number | String | Bool | FunctionCall | Identifier | "(" , Expression , ")"
     fn parse_primary(&mut self) -> Expr {
         match self.advance() {
             Token::Number(n) => Expr::Number(n),
@@ -227,6 +229,8 @@ impl Parser {
                     Expr::Variable(id)
                 }
             }
+            Token::Bool(b) => Expr::Bool(b),
+            Token::String(s) => Expr::String(s),
             _ => panic!("Unexpected token"),
         }
     }

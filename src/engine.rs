@@ -2,13 +2,79 @@ use std::collections::HashMap;
 use super::parser;
 
 /// 変数や関数のスコープを管理する構造体
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Environment {
-    variables: HashMap<String, i64>,
+    variables: HashMap<String, Value>,
+}
+
+impl Environment {
+    pub fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+        }
+    }
 }
 
 pub struct Interpreter {
     functions: HashMap<String, parser::FunctionDecl>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Value {
+    Number(f64),
+    String(String),
+    Bool(bool),
+    Null,
+}
+
+impl std::ops::Add for Value {
+    type Output = Value;
+    fn add(self, rhs: Self) -> Self::Output {
+        let rhs = &rhs;
+        let this = &self;
+        match (this, rhs) {
+            (Value::Number(l), Value::Number(r)) => Value::Number(l + r),
+            (Value::String(l), Value::String(r)) => Value::String(format!("{}{}", l, r)),
+            _ => panic!("Cannot add {:?} and {:?}", this, rhs),
+        }
+    }
+}
+
+impl std::ops::Sub for Value {
+    type Output = Value;
+    fn sub(self, rhs: Self) -> Self::Output {
+        let rhs = &rhs;
+        let this = &self;
+        match (this, rhs) {
+            (Value::Number(l), Value::Number(r)) => Value::Number(l - r),
+            _ => panic!("Cannot add {:?} and {:?}", this, rhs),
+        }
+    }
+}
+
+impl std::ops::Mul for Value {
+    type Output = Value;
+    fn mul(self, rhs: Self) -> Self::Output {
+        let rhs = &rhs;
+        let this = &self;
+        match (this, rhs) {
+            (Value::Number(l), Value::Number(r)) => Value::Number(l * r),
+            _ => panic!("Cannot add {:?} and {:?}", this, rhs),
+        }
+    }
+}
+
+impl std::ops::Div for Value {
+    type Output = Value;
+    fn div(self, rhs: Self) -> Self::Output {
+        let rhs = &rhs;
+        let this = &self;
+        match (rhs, this) {
+            (Value::Number(_), Value::Number(0f64)) => panic!("Cannot divide by zero"),
+            (Value::Number(l), Value::Number(r)) => Value::Number(l / r),
+            _ => panic!("Cannot add {:?} and {:?}", this, rhs),
+        }
+    }
 }
 
 impl Interpreter {
@@ -21,14 +87,13 @@ impl Interpreter {
     }
 
     /// メイン関数から実行を開始する
-    pub fn run(&self) -> i64 {
+    pub fn run(&self) -> Value {
         let main_fn = self.functions.get("main").expect("main function not found");
-        let mut env = Environment::default();
+        let mut env = Environment::new();
         self.execute_block(&main_fn.body, &mut env)
     }
 
-    fn execute_block(&self, block: &parser::Block, env: &mut Environment) -> i64 {
-        // 文を順番に実行
+    fn execute_block(&self, block: &parser::Block, env: &mut Environment) -> Value {
         for stmt in &block.statements {
             match stmt {
                 parser::Statement::Let { name, value } => {
@@ -45,14 +110,14 @@ impl Interpreter {
         if let Some(expr) = &block.return_expr {
             self.eval_expr(expr, env)
         } else {
-            0
+            Value::Null
         }
     }
 
-    fn eval_expr(&self, expr: &parser::Expr, env: &mut Environment) -> i64 {
+    fn eval_expr(&self, expr: &parser::Expr, env: &mut Environment) -> Value {
         match expr {
-            parser::Expr::Number(n) => *n,
-            parser::Expr::Variable(name) => *env.variables.get(name).expect("Undefined variable"),
+            parser::Expr::Number(n) => Value::Number(*n),
+            parser::Expr::Variable(name) => env.variables.get(name).expect("Undefined variable").clone(),
             parser::Expr::Binary { left, op, right } => {
                 let l = self.eval_expr(left, env);
                 let r = self.eval_expr(right, env);
@@ -66,7 +131,7 @@ impl Interpreter {
             parser::Expr::Assign { name, value } => {
                 let val = self.eval_expr(value, env);
                 if env.variables.contains_key(name) {
-                    env.variables.insert(name.clone(), val);
+                    env.variables.insert(name.clone(), val.clone());
                     val
                 } else {
                     panic!("Variable '{}' not defined", name);
@@ -76,17 +141,22 @@ impl Interpreter {
                 if name == "print" {
                     for arg in args {
                         let val = self.eval_expr(arg, env);
-                        println!("{}", val);
+                        match val {
+                            Value::Number(n) => println!("{}", n),
+                            Value::String(s) => println!("{}", s),
+                            Value::Bool(b) => println!("{}", b),
+                            Value::Null => println!("null"),
+                        }
                     }
-                    return 0;
+                    return Value::Null;
                 } else if name == "ask" {
                     assert!(args.len() == 0);
                     let mut input = String::new();
                     std::io::stdin().read_line(&mut input).unwrap();
-                    return input.trim().parse().unwrap();
+                    return Value::String(input)
                 }
                 let func = self.functions.get(name).expect("Undefined function");
-                let mut new_env = Environment::default();
+                let mut new_env = Environment::new();
 
                 // 引数を評価して新しい環境（スコープ）にバインド
                 for (param_name, arg_expr) in func.params.iter().zip(args) {
@@ -97,6 +167,9 @@ impl Interpreter {
                 // 関数のボディを実行
                 self.execute_block(&func.body, &mut new_env)
             }
+            parser::Expr::String(s) => Value::String(s.to_string()),
+            &parser::Expr::Bool(b) => Value::Bool(b),
+            
         }
     }
 }

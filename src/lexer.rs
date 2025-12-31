@@ -1,12 +1,14 @@
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // キーワード
-    Fn,      // fn
-    Let,     // let
+    Fn,  // fn
+    Let, // let
 
     // 識別子とリテラル
     Identifier(String), // 変数名、関数名
-    Number(i64),        // 数値 (10, 42など)
+    Number(f64),        // 数 (10, 42など)
+    String(String),     // 文字列（"hello"など）
+    Bool(bool),         // 真偽値（true, false）
 
     // 演算子
     Plus,     // +
@@ -46,21 +48,72 @@ impl<'a> Lexer<'a> {
 
         while let Some(&c) = self.input.peek() {
             match c {
-                ' ' | '\t' | '\n' | '\r' => { self.input.next(); } // 空白をスキップ
-                '+' => { tokens.push(Token::Plus); self.input.next(); }
-                '-' => { tokens.push(Token::Minus); self.input.next(); }
-                '*' => { tokens.push(Token::Asterisk); self.input.next(); }
-                '/' => { tokens.push(Token::Slash); self.input.next(); }
-                '=' => { tokens.push(Token::Assign); self.input.next(); }
-                '(' => { tokens.push(Token::LParen); self.input.next(); }
-                ')' => { tokens.push(Token::RParen); self.input.next(); }
-                '{' => { tokens.push(Token::LBrace); self.input.next(); }
-                '}' => { tokens.push(Token::RBrace); self.input.next(); }
-                ',' => { tokens.push(Token::Comma); self.input.next(); }
-                ';' => { tokens.push(Token::SemiColon); self.input.next(); }
+                ' ' | '\t' | '\n' | '\r' => {
+                    self.input.next();
+                } // 空白をスキップ
+                '+' => {
+                    tokens.push(Token::Plus);
+                    self.input.next();
+                }
+                '-' => {
+                    tokens.push(Token::Minus);
+                    self.input.next();
+                }
+                '*' => {
+                    tokens.push(Token::Asterisk);
+                    self.input.next();
+                }
+                '/' => {
+                    tokens.push(Token::Slash);
+                    self.input.next();
+                }
+                '=' => {
+                    tokens.push(Token::Assign);
+                    self.input.next();
+                }
+                '(' => {
+                    tokens.push(Token::LParen);
+                    self.input.next();
+                }
+                ')' => {
+                    tokens.push(Token::RParen);
+                    self.input.next();
+                }
+                '{' => {
+                    tokens.push(Token::LBrace);
+                    self.input.next();
+                }
+                '}' => {
+                    tokens.push(Token::RBrace);
+                    self.input.next();
+                }
+                ',' => {
+                    tokens.push(Token::Comma);
+                    self.input.next();
+                }
+                ';' => {
+                    tokens.push(Token::SemiColon);
+                    self.input.next();
+                }
+                '"' => {
+                    let mut string_literal = String::new();
+                    self.input.next(); // "を消費
+                    while let Some(&c) = self.input.peek() {
+                        if c == '"' {
+                            self.input.next();
+                            break;
+                        } else {
+                            string_literal.push(c);
+                            self.input.next();
+                        }
+                    }
+                    tokens.push(Token::String(string_literal));
+                }
                 '0'..='9' => tokens.push(self.read_number()),
                 'a'..='z' | 'A'..='Z' | '_' => tokens.push(self.read_identifier()),
-                _ => { panic!("Unknown character: {}", c); }
+                _ => {
+                    panic!("Unknown character: {}", c);
+                }
             }
         }
         tokens.push(Token::EOF);
@@ -70,13 +123,13 @@ impl<'a> Lexer<'a> {
     fn read_number(&mut self) -> Token {
         let mut number_str = String::new();
         while let Some(&c) = self.input.peek() {
-            if c.is_ascii_digit() {
+            if c.is_ascii_digit() || c == '.' {
                 number_str.push(self.input.next().unwrap());
             } else {
                 break;
             }
         }
-        Token::Number(number_str.parse().unwrap())
+        return Token::Number(number_str.parse().unwrap());
     }
 
     fn read_identifier(&mut self) -> Token {
@@ -92,6 +145,8 @@ impl<'a> Lexer<'a> {
         match id_str.as_str() {
             "fn" => Token::Fn,
             "let" => Token::Let,
+            "true" => Token::Bool(true),
+            "false" => Token::Bool(false),
             _ => Token::Identifier(id_str),
         }
     }
