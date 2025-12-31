@@ -3,6 +3,8 @@ pub enum Token {
     // キーワード
     Fn,  // fn
     Let, // let
+    Else,
+    If,
 
     // 識別子とリテラル
     Identifier(String), // 変数名、関数名
@@ -147,6 +149,8 @@ impl<'a> Lexer<'a> {
             "let" => Token::Let,
             "true" => Token::Bool(true),
             "false" => Token::Bool(false),
+            "if" => Token::If,
+            "else" => Token::Else,
             _ => Token::Identifier(id_str),
         }
     }

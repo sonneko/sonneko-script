@@ -1,11 +1,12 @@
 use super::lexer::Token;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     // 数値リテラル: 42
     Number(f64),
     String(String),
     Bool(bool),
+    Null,
     
     // 変数参照: x
     Variable(String),
@@ -28,9 +29,15 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
+
+    If {
+        condition: Box<Expr>,
+        then_branch: Block,
+        else_branch: Option<Block>,
+    },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BinOp {
     Add,      // +
     Sub,      // -
@@ -38,31 +45,31 @@ pub enum BinOp {
     Div,      // /
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     // 変数宣言: let x = 5;
     Let {
         name: String,
-        value: Expr,
+        value: Option<Expr>,
     },
     // 式文: foo();
     ExprStmt(Expr),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Block {
     pub statements: Vec<Statement>,
     pub return_expr: Option<Box<Expr>>, // Rust風に最後がセミコロンなしなら戻り値
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionDecl {
     pub name: String,
     pub params: Vec<String>,
     pub body: Block,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Program {
     pub functions: Vec<FunctionDecl>,
 }
@@ -156,10 +163,14 @@ impl Parser {
     fn parse_let_stmt(&mut self) -> Statement {
         self.expect(Token::Let);
         let name = if let Token::Identifier(id) = self.advance() { id } else { panic!("Expected variable name") };
+        if let Token::SemiColon = self.peek() {
+            self.advance();
+            return Statement::Let { name, value: None };
+        }
         self.expect(Token::Assign);
         let value = self.parse_expression();
         self.expect(Token::SemiColon);
-        Statement::Let { name, value }
+        Statement::Let { name, value: Some(value) }
     }
 
     // Expression = Assignment
@@ -167,8 +178,19 @@ impl Parser {
         self.parse_assignment()
     }
 
-    // Assignment = Identifier , "=" , Expression | Addition
+    // Assignment = Identifier , "=" , Expression | Addition | "if" , Expression , Block, "else" , Expression
     fn parse_assignment(&mut self) -> Expr {
+        if self.peek() == &Token::If {
+            self.advance();
+            let condition = self.parse_expression();
+            let then_branch = self.parse_block();
+            if self.peek() == &Token::Else {
+                self.advance();
+                let else_branch = self.parse_block();
+                return Expr::If { condition: Box::new(condition), then_branch, else_branch: Some(else_branch) };
+            }
+            return Expr::If { condition: Box::new(condition), then_branch, else_branch: None };
+        }
         let left = self.parse_addition();
         
         if let Expr::Variable(name) = &left {

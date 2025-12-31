@@ -97,7 +97,11 @@ impl Interpreter {
         for stmt in &block.statements {
             match stmt {
                 parser::Statement::Let { name, value } => {
-                    let val = self.eval_expr(value, env);
+                    let val = self.eval_expr(
+                        &<Option<parser::Expr> as Clone>::clone(&value)
+                            .unwrap_or(parser::Expr::Null),
+                        env,
+                    );
                     env.variables.insert(name.clone(), val);
                 }
                 parser::Statement::ExprStmt(expr) => {
@@ -117,7 +121,9 @@ impl Interpreter {
     fn eval_expr(&self, expr: &parser::Expr, env: &mut Environment) -> Value {
         match expr {
             parser::Expr::Number(n) => Value::Number(*n),
-            parser::Expr::Variable(name) => env.variables.get(name).expect("Undefined variable").clone(),
+            parser::Expr::Variable(name) => {
+                env.variables.get(name).expect("Undefined variable").clone()
+            }
             parser::Expr::Binary { left, op, right } => {
                 let l = self.eval_expr(left, env);
                 let r = self.eval_expr(right, env);
@@ -153,7 +159,7 @@ impl Interpreter {
                     assert!(args.len() == 0);
                     let mut input = String::new();
                     std::io::stdin().read_line(&mut input).unwrap();
-                    return Value::String(input)
+                    return Value::String(input);
                 }
                 let func = self.functions.get(name).expect("Undefined function");
                 let mut new_env = Environment::new();
@@ -168,8 +174,34 @@ impl Interpreter {
                 self.execute_block(&func.body, &mut new_env)
             }
             parser::Expr::String(s) => Value::String(s.to_string()),
-            &parser::Expr::Bool(b) => Value::Bool(b),
-            
+            parser::Expr::Bool(b) => Value::Bool(*b),
+            parser::Expr::Null => Value::Null,
+            parser::Expr::If { condition, then_branch, else_branch } => {
+                let cond = self.eval_expr(&*condition, env);
+                if let Value::Bool(b) = cond {
+                    if b {
+                        self.execute_block(&then_branch, env)
+                    } else {
+                        if else_branch.is_some() {
+                            self.execute_block(&else_branch.clone().unwrap(), env)
+                        } else {
+                            Value::Null
+                        }
+                    }
+                } else if let Value::Number(n) = cond {
+                    if n != 0f64 {
+                        self.execute_block(&then_branch, env)
+                    } else {
+                        if else_branch.is_some() {
+                            self.execute_block(&else_branch.clone().unwrap(), env)
+                        } else {
+                            Value::Null
+                        }
+                    }
+                } else {
+                    panic!("Expected boolean condition");
+                }
+            }
         }
     }
 }
