@@ -1,0 +1,32 @@
+(* プログラムの全体構造 *)
+Program        = { FunctionDecl } ;
+
+(* 関数宣言: fn main(x, y) { ... } *)
+FunctionDecl   = "fn" , Identifier , "(" , [ ParamList ] , ")" , Block ;
+ParamList      = Identifier , { "," , Identifier } ;
+
+(* ブロックと文 *)
+Block          = "{" , { Statement } , [ Expression ] , "}" ;
+Statement      = LetStmt | ExprStmt ;
+LetStmt        = "let" , Identifier , "=" , Expression , ";" ;
+ExprStmt       = Expression , ";" ;
+
+(* 式（優先順位を考慮） *)
+Expression     = Assignment ;
+Assignment     = Identifier , "=" , Expression | Addition ;
+Addition       = Multiplication , { ( "+" | "-" ) , Multiplication } ;
+Multiplication = Primary , { ( "*" | "/" ) , Primary } ;
+
+(* 基本要素 *)
+Primary        = Number 
+               | FunctionCall 
+               | Identifier 
+               | "(" , Expression , ")" ;
+
+(* 関数呼び出し: add(1, 2) *)
+FunctionCall   = Identifier , "(" , [ ArgList ] , ")" ;
+ArgList        = Expression , { "," , Expression } ;
+
+(* 字句規則（簡易表現） *)
+Identifier     = letter , { letter | digit } ;
+Number         = digit , { digit } ;
