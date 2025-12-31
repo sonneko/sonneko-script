@@ -25,6 +25,7 @@ pub enum Value {
     String(String),
     Bool(bool),
     Null,
+    Array(Vec<Value>),
 }
 
 impl std::ops::Add for Value {
@@ -152,6 +153,7 @@ impl Interpreter {
                             Value::String(s) => println!("{}", s),
                             Value::Bool(b) => println!("{}", b),
                             Value::Null => println!("null"),
+                            Value::Array(vec) => println!("{:?}", vec),
                         }
                     }
                     return Value::Null;
@@ -160,6 +162,35 @@ impl Interpreter {
                     let mut input = String::new();
                     std::io::stdin().read_line(&mut input).unwrap();
                     return Value::String(input);
+                } else if name == "array" {
+                    let mut vec = Vec::new();
+                    for arg in args {
+                        vec.push(self.eval_expr(arg, env));
+                    }
+                    return Value::Array(vec);
+                } else if name == "array_get" {
+                    assert!(args.len() == 2);
+                    let index = self.eval_expr(&args[1], env);
+                    let array = self.eval_expr(&args[0], env);
+                    return if let (Value::Array(vec), Value::Number(n)) = (array, index) {
+                        if let Some(t) = vec.get(n as usize) {
+                            t.clone()
+                        } else {
+                            Value::Null
+                        }
+                    } else {
+                        panic!("Invalid array or index");
+                    };
+                } else if name == "array_set" {
+                    assert!(args.len() == 3);
+                    let index = self.eval_expr(&args[1], env);
+                    let array = self.eval_expr(&args[0], env);
+                    return if let (Value::Array(mut vec), Value::Number(n)) = (array, index) {
+                        vec.get_mut(n as usize).map(|v| *v = self.eval_expr(&args[2], env));
+                        Value::Array(vec)
+                    } else {
+                        panic!("Invalid array or index");
+                    };
                 }
                 let func = self.functions.get(name).expect("Undefined function");
                 let mut new_env = Environment::new();
@@ -189,7 +220,7 @@ impl Interpreter {
                         }
                     }
                 } else if let Value::Number(n) = cond {
-                    if n != 0f64 {
+                    if n > 0f64 {
                         self.execute_block(&then_branch, env)
                     } else {
                         if else_branch.is_some() {

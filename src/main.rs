@@ -15,6 +15,7 @@ fn main() {
 fn execute(source: String) {
     let mut lexer = lexer::Lexer::new(&source);
     let tokens = lexer.tokenize();
+    println!("{:?}", tokens);
     let mut parser = parser::Parser::new(tokens);
     let ast = parser.parse_program();
     let engine = engine::Interpreter::new(ast);

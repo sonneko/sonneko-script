@@ -53,6 +53,14 @@ impl<'a> Lexer<'a> {
                 ' ' | '\t' | '\n' | '\r' => {
                     self.input.next();
                 } // 空白をスキップ
+                '#' => {
+                    while let Some(&c) = self.input.peek() {
+                        if c == '\n' {
+                            break;
+                        }
+                        self.input.next();
+                    }
+                }
                 '+' => {
                     tokens.push(Token::Plus);
                     self.input.next();

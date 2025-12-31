@@ -1,9 +1,68 @@
-fn main() {
-    let x = 2;
-    if x - 2 {
-        x = x + 2;
+
+fn init_mem(size) {
+    array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+}
+
+fn find_match(code, pc, step, depth) {
+    let current = array_get(code, pc);
+    let next_depth = if current == "[" {
+        depth + 1
+    } else {
+        if current == "]" { depth - 1 } else { depth }
     };
 
-    print("Hello World!");
-    print(x);
+    if next_depth == 0 {
+        pc
+    } else {
+        find_match(code, pc + step, step, next_depth)
+    }
+}
+
+# メインの実行ルーチン
+fn execute_bf(code, pc, ptr, mem) {
+    if pc == array_length(code) { # 終端に達したら終了
+        return null;
+    }
+
+    let cmd = array_get(code, pc);
+    
+    if cmd == ">" {
+        execute_bf(code, pc + 1, ptr + 1, mem)
+    } else if cmd == "<" {
+        execute_bf(code, pc + 1, ptr - 1, mem)
+    } else if cmd == "+" {
+        let val = array_get(mem, ptr) + 1;
+        execute_bf(code, pc + 1, ptr, array_set(mem, ptr, val))
+    } else if cmd == "-" {
+        let val = array_get(mem, ptr) - 1;
+        execute_bf(code, pc + 1, ptr, array_set(mem, ptr, val))
+    } else if cmd == "." {
+        print(array_get(mem, ptr)); # 数値として出力
+        execute_bf(code, pc + 1, ptr, mem)
+    } else if cmd == "[" {
+        if array_get(mem, ptr) == 0 {
+            # 0なら ] の次までジャンプ
+            let target = find_match(code, pc + 1, 1, 1);
+            execute_bf(code, target + 1, ptr, mem)
+        } else {
+            execute_bf(code, pc + 1, ptr, mem)
+        }
+    } else if cmd == "]" {
+        if array_get(mem, ptr) == 0 {
+            execute_bf(code, pc + 1, ptr, mem)
+        } else {
+            # 0でなければ [ まで戻る
+            let target = find_match(code, pc - 1, 0 - 1, 1);
+            execute_bf(code, target + 1, ptr, mem)
+        }
+    } else {
+        # その他の文字（改行など）は無視
+        execute_bf(code, pc + 1, ptr, mem)
+    }
+}
+
+fn main() {
+    let code = array("+", "+", "[", "-", "]", "."); # テスト用: 2を表示
+    let mem = array(0, 0, 0, 0, 0);
+    execute_bf(code, 0, 0, mem);
 }
