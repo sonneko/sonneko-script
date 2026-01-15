@@ -1,259 +1,427 @@
-use super::lexer::Token;
+use crate::tokens::{Token, TokenKind};
+use crate::ast::*;
+use std::iter::Peekable;
+use std::vec::IntoIter;
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    // 数値リテラル: 42
-    Number(f64),
-    String(String),
-    Bool(bool),
-    Null,
-    
-    // 変数参照: x
-    Variable(String),
-    
-    // 二項演算: 1 + 2, x * 10
-    Binary {
-        left: Box<Expr>,
-        op: BinOp,
-        right: Box<Expr>,
-    },
-    
-    // 関数呼び出し: add(1, 2)
-    Call {
-        name: String,
-        args: Vec<Expr>,
-    },
-    
-    // 変数代入: x = 5
-    Assign {
-        name: String,
-        value: Box<Expr>,
-    },
-
-    If {
-        condition: Box<Expr>,
-        then_branch: Block,
-        else_branch: Option<Block>,
-    },
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum BinOp {
-    Add,      // +
-    Sub,      // -
-    Mul,      // *
-    Div,      // /
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Statement {
-    // 変数宣言: let x = 5;
-    Let {
-        name: String,
-        value: Option<Expr>,
-    },
-    // 式文: foo();
-    ExprStmt(Expr),
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Block {
-    pub statements: Vec<Statement>,
-    pub return_expr: Option<Box<Expr>>, // Rust風に最後がセミコロンなしなら戻り値
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct FunctionDecl {
-    pub name: String,
-    pub params: Vec<String>,
-    pub body: Block,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Program {
-    pub functions: Vec<FunctionDecl>,
-}
+// ==========================================
+// 4. Parser (Recursive Descent)
+// ==========================================
 
 pub struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
+    tokens: Peekable<IntoIter<Token>>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens: tokens.into_iter().peekable(),
+        }
     }
 
-    // ヘルパー関数: 現在のトークンを取得
-    fn peek(&self) -> &Token {
-        &self.tokens[self.pos]
+    // --- Helper Methods ---
+
+    fn peek(&mut self) -> TokenKind {
+        self.tokens.peek().map(|t| t.kind.clone()).unwrap_or(TokenKind::EOF)
     }
 
-    // ヘルパー関数: トークンを1つ進める
     fn advance(&mut self) -> Token {
-        let token = self.tokens[self.pos].clone();
-        if token != Token::EOF {
-            self.pos += 1;
-        }
-        token
+        self.tokens.next().unwrap_or(Token { kind: TokenKind::EOF })
     }
 
-    // ヘルパー関数: 期待したトークンがあれば消費、なければエラー
-    fn expect(&mut self, expected: Token) {
-        let actual = self.advance();
-        if actual != expected {
-            panic!("Expected {:?}, but found {:?}", expected, actual);
+    fn consume(&mut self, expected: TokenKind) -> Result<(), String> {
+        let got = self.peek();
+        if got == expected {
+            self.advance();
+            Ok(())
+        } else {
+            Err(format!("Expected {:?}, but got {:?}", expected, got))
         }
     }
 
-    // Program = { FunctionDecl }
-    pub fn parse_program(&mut self) -> Program {
-        let mut functions = Vec::new();
-        while *self.peek() != Token::EOF {
-            functions.push(self.parse_function_decl());
+    fn expect_identifier(&mut self) -> Result<String, String> {
+        match self.peek() {
+            TokenKind::Identifier(s) => {
+                self.advance();
+                Ok(s)
+            }
+            got => Err(format!("Expected Identifier, got {:?}", got)),
         }
-        Program { functions }
     }
 
-    // FunctionDecl = "fn" , Identifier , "(" , [ ParamList ] , ")" , Block
-    fn parse_function_decl(&mut self) -> FunctionDecl {
-        self.expect(Token::Fn);
+    // --- Grammar Implementation ---
+
+    // <program> ::= { <function_decl> | <object_decl> }
+    pub fn parse_program(&mut self) -> Result<Program, String> {
+        let mut decls = Vec::new();
+        while self.peek() != TokenKind::EOF {
+            match self.peek() {
+                TokenKind::Fn => decls.push(self.parse_function_decl()?),
+                TokenKind::Obj => decls.push(self.parse_object_decl()?),
+                got => return Err(format!("Expected 'fn' or 'obj', got {:?}", got)),
+            }
+        }
+        Ok(Program { decls })
+    }
+
+    // <function_decl> ::= "fn" <identifier> "(" [<param_list>] ")" <block>
+    fn parse_function_decl(&mut self) -> Result<Decl, String> {
+        self.consume(TokenKind::Fn)?;
+        let name = self.expect_identifier()?;
+        self.consume(TokenKind::LParen)?;
         
-        let name = if let Token::Identifier(id) = self.advance() { id } else { panic!("Expected function name") };
-        
-        self.expect(Token::LParen);
         let mut params = Vec::new();
-        if let Token::Identifier(_) = self.peek() {
-            if let Token::Identifier(id) = self.advance() { params.push(id); }
-            while *self.peek() == Token::Comma {
-                self.advance();
-                if let Token::Identifier(id) = self.advance() { params.push(id); }
-            }
+        if self.peek() != TokenKind::RParen {
+            params = self.parse_param_list()?;
         }
-        self.expect(Token::RParen);
         
-        let body = self.parse_block();
-        FunctionDecl { name, params, body }
+        self.consume(TokenKind::RParen)?;
+        let body = self.parse_block()?;
+        
+        Ok(Decl::Function { name, params, body })
     }
 
-    // Block = "{" , { Statement } , [ Expression ] , "}"
-    fn parse_block(&mut self) -> Block {
-        self.expect(Token::LBrace);
+    // <object_decl> ::= "obj" <identifier> "=" <obj_literal>
+    fn parse_object_decl(&mut self) -> Result<Decl, String> {
+        self.consume(TokenKind::Obj)?;
+        let name = self.expect_identifier()?;
+        self.consume(TokenKind::Assign)?;
+        let literals = self.parse_obj_literal()?; // Returns Vec<Param>
+        Ok(Decl::Object { name, literals })
+    }
+
+    // <obj_literal> ::= "{" [<param_list>] "}"
+    fn parse_obj_literal(&mut self) -> Result<Vec<Param>, String> {
+        self.consume(TokenKind::LBrace)?;
+        let mut params = Vec::new();
+        if self.peek() != TokenKind::RBrace {
+            params = self.parse_param_list()?;
+        }
+        self.consume(TokenKind::RBrace)?;
+        Ok(params)
+    }
+
+    // <param_list> ::= <param> {"," <param>}
+    fn parse_param_list(&mut self) -> Result<Vec<Param>, String> {
+        let mut params = Vec::new();
+        params.push(self.parse_param()?);
+        
+        while self.peek() == TokenKind::Comma {
+            self.advance();
+            params.push(self.parse_param()?);
+        }
+        Ok(params)
+    }
+
+    // <param> ::= <identifier> ":" <type_literal>
+    fn parse_param(&mut self) -> Result<Param, String> {
+        let name = self.expect_identifier()?;
+        self.consume(TokenKind::Colon)?;
+        let type_lit = self.parse_type_literal()?;
+        Ok(Param { name, type_lit })
+    }
+
+    // <type_literal> ::= "Int" | "Float" | "String" | "Bool" | <identifier>
+    fn parse_type_literal(&mut self) -> Result<TypeLiteral, String> {
+        match self.peek() {
+            TokenKind::TypeInt => { self.advance(); Ok(TypeLiteral::Int) },
+            TokenKind::TypeFloat => { self.advance(); Ok(TypeLiteral::Float) },
+            TokenKind::TypeString => { self.advance(); Ok(TypeLiteral::String) },
+            TokenKind::TypeBool => { self.advance(); Ok(TypeLiteral::Bool) },
+            TokenKind::Identifier(s) => { self.advance(); Ok(TypeLiteral::Custom(s)) },
+            got => Err(format!("Expected type literal, got {:?}", got)),
+        }
+    }
+
+    // <block> ::= "{" {<statement>} "}"
+    fn parse_block(&mut self) -> Result<Block, String> {
+        self.consume(TokenKind::LBrace)?;
         let mut statements = Vec::new();
-        let mut return_expr = None;
-
-        while *self.peek() != Token::RBrace {
-            if *self.peek() == Token::Let {
-                statements.push(self.parse_let_stmt());
-            } else {
-                let expr = self.parse_expression();
-                if *self.peek() == Token::SemiColon {
-                    self.advance();
-                    statements.push(Statement::ExprStmt(expr));
-                } else {
-                    return_expr = Some(Box::new(expr));
-                    break;
-                }
-            }
+        while self.peek() != TokenKind::RBrace && self.peek() != TokenKind::EOF {
+            statements.push(self.parse_statement()?);
         }
-        self.expect(Token::RBrace);
-        Block { statements, return_expr }
+        self.consume(TokenKind::RBrace)?;
+        Ok(Block { statements })
     }
 
-    fn parse_let_stmt(&mut self) -> Statement {
-        self.expect(Token::Let);
-        let name = if let Token::Identifier(id) = self.advance() { id } else { panic!("Expected variable name") };
-        if let Token::SemiColon = self.peek() {
+    // <statement> select based on start token
+    fn parse_statement(&mut self) -> Result<Statement, String> {
+        match self.peek() {
+            TokenKind::Return => self.parse_return_statement(),
+            TokenKind::Let => self.parse_let_statement(),
+            TokenKind::If => self.parse_if_statement(),
+            TokenKind::While => self.parse_while_statement(),
+            TokenKind::Break => self.parse_break_statement(),
+            TokenKind::Continue => self.parse_continue_statement(),
+            _ => self.parse_expression_statement(),
+        }
+    }
+
+    // <return_statement> ::= "return" <expression> ";"
+    fn parse_return_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::Return)?;
+        let expr = self.parse_expression()?;
+        self.consume(TokenKind::SemiColon)?;
+        Ok(Statement::Return(expr))
+    }
+
+    // <let_statement> ::= "let" <identifier> [ "=" <expression> ] ";"
+    fn parse_let_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::Let)?;
+        let name = self.expect_identifier()?;
+        let mut init = None;
+        if self.peek() == TokenKind::Assign {
             self.advance();
-            return Statement::Let { name, value: None };
+            init = Some(self.parse_expression()?);
         }
-        self.expect(Token::Assign);
-        let value = self.parse_expression();
-        self.expect(Token::SemiColon);
-        Statement::Let { name, value: Some(value) }
+        self.consume(TokenKind::SemiColon)?;
+        Ok(Statement::Let { name, init })
     }
 
-    // Expression = Assignment
-    fn parse_expression(&mut self) -> Expr {
-        self.parse_assignment()
+    // <expression_statement> ::= <expression> ";"
+    fn parse_expression_statement(&mut self) -> Result<Statement, String> {
+        let expr = self.parse_expression()?;
+        self.consume(TokenKind::SemiColon)?;
+        Ok(Statement::Expression(expr))
     }
 
-    // Assignment = Identifier , "=" , Expression | Addition | "if" , Expression , Block, "else" , Expression
-    fn parse_assignment(&mut self) -> Expr {
-        if self.peek() == &Token::If {
-            self.advance();
-            let condition = self.parse_expression();
-            let then_branch = self.parse_block();
-            if self.peek() == &Token::Else {
-                self.advance();
-                let else_branch = self.parse_block();
-                return Expr::If { condition: Box::new(condition), then_branch, else_branch: Some(else_branch) };
-            }
-            return Expr::If { condition: Box::new(condition), then_branch, else_branch: None };
-        }
-        let left = self.parse_addition();
+    // <if_statement>
+    fn parse_if_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::If)?;
+        let condition = self.parse_expression()?;
+        let then_block = self.parse_block()?;
         
-        if let Expr::Variable(name) = &left {
-            if *self.peek() == Token::Assign {
-                self.advance();
-                let value = self.parse_expression();
-                return Expr::Assign { name: name.clone(), value: Box::new(value) };
+        let mut else_ifs = Vec::new();
+        let mut else_block = None;
+
+        while self.peek() == TokenKind::Else {
+            self.advance(); // consume 'else'
+            if self.peek() == TokenKind::If {
+                self.advance(); // consume 'if'
+                let ei_cond = self.parse_expression()?;
+                let ei_block = self.parse_block()?;
+                else_ifs.push((ei_cond, ei_block));
+            } else {
+                // just 'else' -> else block
+                else_block = Some(self.parse_block()?);
+                break;
             }
         }
-        left
+
+        Ok(Statement::If { condition, then_block, else_ifs, else_block })
     }
 
-    // Addition = Multiplication , { ( "+" | "-" ) , Multiplication }
-    fn parse_addition(&mut self) -> Expr {
-        let mut node = self.parse_multiplication();
-        while matches!(self.peek(), Token::Plus | Token::Minus) {
-            let op = if self.advance() == Token::Plus { BinOp::Add } else { BinOp::Sub };
-            let right = self.parse_multiplication();
-            node = Expr::Binary { left: Box::new(node), op, right: Box::new(right) };
+    // <while_statement> ::= "while" <expression> <block>
+    fn parse_while_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::While)?;
+        let condition = self.parse_expression()?;
+        let block = self.parse_block()?;
+        Ok(Statement::While { condition, block })
+    }
+
+    // <break_statement> ::= "break" ";"
+    fn parse_break_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::Break)?;
+        self.consume(TokenKind::SemiColon)?;
+        Ok(Statement::Break)
+    }
+
+    // <continue_statement> ::= "continue" ";"
+    fn parse_continue_statement(&mut self) -> Result<Statement, String> {
+        self.consume(TokenKind::Continue)?;
+        self.consume(TokenKind::SemiColon)?;
+        Ok(Statement::Continue)
+    }
+
+    // Expressions
+    
+    // <expression> ::= <logical_or> { "||" <logical_or> }
+    fn parse_expression(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_logical_or()?;
+        while self.peek() == TokenKind::Or {
+            self.advance();
+            let right = self.parse_logical_or()?;
+            left = Expression::Binary { left: Box::new(left), op: BinaryOp::Or, right: Box::new(right) };
         }
-        node
+        Ok(left)
     }
 
-    // Multiplication = Primary , { ( "*" | "/" ) , Primary }
-    fn parse_multiplication(&mut self) -> Expr {
-        let mut node = self.parse_primary();
-        while matches!(self.peek(), Token::Asterisk | Token::Slash) {
-            let op = if self.advance() == Token::Asterisk { BinOp::Mul } else { BinOp::Div };
-            let right = self.parse_primary();
-            node = Expr::Binary { left: Box::new(node), op, right: Box::new(right) };
+    // <logical_or> ::= <logical_and> { "&&" <logical_and> }
+    fn parse_logical_or(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_logical_and()?;
+        while self.peek() == TokenKind::And {
+            self.advance();
+            let right = self.parse_logical_and()?;
+            left = Expression::Binary { left: Box::new(left), op: BinaryOp::And, right: Box::new(right) };
         }
-        node
+        Ok(left)
     }
 
-    // Primary = Number | String | Bool | FunctionCall | Identifier | "(" , Expression , ")"
-    fn parse_primary(&mut self) -> Expr {
-        match self.advance() {
-            Token::Number(n) => Expr::Number(n),
-            Token::LParen => {
-                let expr = self.parse_expression();
-                self.expect(Token::RParen);
-                expr
-            }
-            Token::Identifier(id) => {
-                if *self.peek() == Token::LParen {
-                    self.advance();
+    // <logical_and_expression> ::= <equality_expression> {("==" | "!=") <equality_expression>}
+    fn parse_logical_and(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_equality()?;
+        // EBNF strictly implies NO loop, but just one op. 
+        // We use a loop for standard precedence climbing behavior (left associative).
+        while matches!(self.peek(), TokenKind::Eq | TokenKind::Ne) {
+            let op = match self.advance().kind {
+                TokenKind::Eq => BinaryOp::Eq,
+                TokenKind::Ne => BinaryOp::Ne,
+                _ => unreachable!(),
+            };
+            let right = self.parse_equality()?;
+            left = Expression::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // <equality_expression> ::= <relational> ...
+    fn parse_equality(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_relational()?;
+        while matches!(self.peek(), TokenKind::Lt | TokenKind::Le | TokenKind::Gt | TokenKind::Ge) {
+            let op = match self.advance().kind {
+                TokenKind::Lt => BinaryOp::Lt,
+                TokenKind::Le => BinaryOp::Le,
+                TokenKind::Gt => BinaryOp::Gt,
+                TokenKind::Ge => BinaryOp::Ge,
+                _ => unreachable!(),
+            };
+            let right = self.parse_relational()?;
+            left = Expression::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // <relational_expression> ::= <additive> ...
+    fn parse_relational(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_additive()?;
+        while matches!(self.peek(), TokenKind::Plus | TokenKind::Minus) {
+            let op = match self.advance().kind {
+                TokenKind::Plus => BinaryOp::Add,
+                TokenKind::Minus => BinaryOp::Sub,
+                _ => unreachable!(),
+            };
+            let right = self.parse_additive()?;
+            left = Expression::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // <additive_expression> ::= <multiplicative> ...
+    fn parse_additive(&mut self) -> Result<Expression, String> {
+        let mut left = self.parse_multiplicative()?;
+        while matches!(self.peek(), TokenKind::Star | TokenKind::Slash) {
+            let op = match self.advance().kind {
+                TokenKind::Star => BinaryOp::Mul,
+                TokenKind::Slash => BinaryOp::Div,
+                _ => unreachable!(),
+            };
+            let right = self.parse_multiplicative()?;
+            left = Expression::Binary { left: Box::new(left), op, right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    // <multiplicative_expression> ::= ["-" | "!"] <unary_expression>
+    fn parse_multiplicative(&mut self) -> Result<Expression, String> {
+        if matches!(self.peek(), TokenKind::Minus | TokenKind::Not) {
+            let op_token = self.advance();
+            let op = if op_token.kind == TokenKind::Minus { UnaryOp::Neg } else { UnaryOp::Not };
+            let expr = self.parse_unary()?;
+            Ok(Expression::Unary { op, expr: Box::new(expr) })
+        } else {
+            self.parse_unary()
+        }
+    }
+
+    // <unary_expression> ::= "(" <expression> ")" | <primary_expression>
+    // However, <primary_expression> includes <accesser> which includes <expression>.
+    // Left recursion fix: We start with atoms (paren-expr, literals, identifiers)
+    // and then apply postfix operations (accessors, calls).
+    fn parse_unary(&mut self) -> Result<Expression, String> {
+        // Base case: Atom
+        let mut expr = if self.peek() == TokenKind::LParen {
+            self.advance();
+            let e = self.parse_expression()?;
+            self.consume(TokenKind::RParen)?;
+            e
+        } else {
+            self.parse_primary_atom()?
+        };
+
+        // Postfix loop: handles <accesser> and <function_call> logic
+        // <accesser> ::= <expression> {("::" | ".") <identifier>}
+        // <function_call> ::= <accesser> "(" [<argument_list>] ")"
+        loop {
+            match self.peek() {
+                TokenKind::Dot | TokenKind::DoubleColon => {
+                    // Accesser logic
+                    let token = self.advance();
+                    let separator = if token.kind == TokenKind::Dot { ".".to_string() } else { "::".to_string() };
+                    let field = self.expect_identifier()?;
+                    expr = Expression::Access {
+                        target: Box::new(expr),
+                        separator,
+                        field,
+                    };
+                },
+                TokenKind::LParen => {
+                    // Function Call logic
+                    // EBNF: <function_call> ::= <accesser> "(" [<argument_list>] ")"
+                    // Since 'expr' currently holds the <accesser> part (or a simple atom), we apply the call.
+                    self.advance(); // consume '('
                     let mut args = Vec::new();
-                    if *self.peek() != Token::RParen {
-                        args.push(self.parse_expression());
-                        while *self.peek() == Token::Comma {
-                            self.advance();
-                            args.push(self.parse_expression());
-                        }
+                    if self.peek() != TokenKind::RParen {
+                        args = self.parse_argument_list()?;
                     }
-                    self.expect(Token::RParen);
-                    Expr::Call { name: id, args }
-                } else {
-                    Expr::Variable(id)
-                }
+                    self.consume(TokenKind::RParen)?;
+                    expr = Expression::Call {
+                        callee: Box::new(expr),
+                        args
+                    };
+                },
+                _ => break,
             }
-            Token::Bool(b) => Expr::Bool(b),
-            Token::String(s) => Expr::String(s),
-            _ => panic!("Unexpected token"),
         }
+
+        Ok(expr)
+    }
+
+    // Helper to parse the non-recursive parts of <primary_expression>
+    // <primary_expression> ::= <function_call> | <literal> | <accesser> | <identifier>
+    // Function call and Accesser are handled in parse_unary via postfix loop.
+    fn parse_primary_atom(&mut self) -> Result<Expression, String> {
+        match self.peek() {
+            TokenKind::NumberLit(n) => {
+                self.advance();
+                Ok(Expression::Literal(Literal::Number(n)))
+            },
+            TokenKind::StringLit(s) => {
+                self.advance();
+                Ok(Expression::Literal(Literal::String(s)))
+            },
+            TokenKind::True => {
+                self.advance();
+                Ok(Expression::Literal(Literal::Bool(true)))
+            },
+            TokenKind::False => {
+                self.advance();
+                Ok(Expression::Literal(Literal::Bool(false)))
+            },
+            TokenKind::Identifier(id) => {
+                self.advance();
+                Ok(Expression::Identifier(id))
+            },
+            got => Err(format!("Expected literal or identifier, got {:?}", got)),
+        }
+    }
+
+    // <argument_list> ::= <expression> { "," <expression> }
+    fn parse_argument_list(&mut self) -> Result<Vec<Expression>, String> {
+        let mut args = Vec::new();
+        args.push(self.parse_expression()?);
+        while self.peek() == TokenKind::Comma {
+            self.advance();
+            args.push(self.parse_expression()?);
+        }
+        Ok(args)
     }
 }

@@ -1,0 +1,42 @@
+<program> ::= { <function_decl> | <object_decl> }
+
+<function_decl> ::= "fn" <identifier> "(" [<param_list>] ")" <block>
+
+<param_list> ::= <param> {"," <param>}
+<param> ::= <identifier> ":" <type_literal>
+
+<block> ::= "{" {<statement>} "}"
+
+<statement> ::= <return_statement> | <let_statement> | <expression_statement> | <if_statement> | <while_statement> | <break_statement> | <continue_statement>
+
+<return_statement> ::= "return" <expression>
+<let_statement> ::= "let" <identifier> [ "=" <expression> ] ";"
+<expression_statement> ::= <expression> ";"
+<if_statement> ::= "if" <expression> <block> { "else" "if" <expression> <block> } ["else" <block>]
+<while_statement> ::= "while" <expression> <block>
+<break_statement> ::= "break"
+<continue_statement> ::= "continue"
+
+<expression> ::= <logical_or_expression> { "||" <logical_or_expression>}
+<logical_or_expression> ::= <logical_and_expression> { "&&" <logical_and_expression>}
+<logical_and_expression> ::= <equality_expression> ("==" | "!=") <equality_expression>
+<equality_expression> ::= <relational_expression> ("<" | "<=" | ">" | ">=") <relational_expression>
+<relational_expression> ::= <additive_expression> { ("+" | "-") <additive_expression>}
+<additive_expression> ::= <multiplicative_expression> {("*" | "/") <multiplicative_expression>}
+<multiplicative_expression> ::= ["-" | "!"] <unary_expression>
+<unary_expression> ::= "(" <expression> ")" | <primary_expression>
+
+<primary_expression> ::= <function_call> | <literal> | <accesser> | <identifier>
+
+<function_call> ::= <accesser> "(" [<argument_list>] ")"
+<argument_list> ::= <expression> { "," <expression> }
+
+<literal> ::= <NUMBER_LITERAL> | <STRING_LITEREAL> | "true" | "false"
+
+<object_decl> ::= "obj" <identifier> "=" <obj_literal>
+<obj_literal> ::= "{" [<param_list>] "}"
+
+<accesser> ::= <expression> {("::" | ".") <identifier>}
+
+<type_literal> ::= "Int" | "Float" | "String" | "Bool" | <identifier>
+
